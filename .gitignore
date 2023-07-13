@@ -1,0 +1,5 @@
+#ignore all storage files
+/storage
+
+#ignore secrets
+*.env
