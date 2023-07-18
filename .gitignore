@@ -9,3 +9,6 @@
 
 #ignore some pycache files
 /__pycache__
+
+#ignore logs
+app.log

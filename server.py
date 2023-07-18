@@ -1,5 +1,5 @@
-import random
-
+import logging
+import uuid
 from authentication import *
 from routes import *
 from apnaLawyer import langchain_query_processor, document_input_feeder
@@ -10,6 +10,41 @@ import constants
 load_dotenv(find_dotenv("local.env"))
 
 app = FastAPI()
+
+
+class RequestIDFilter(logging.Filter):
+    def __init__(self, request_id):
+        super().__init__()
+        self.request_id = request_id
+
+    def filter(self, record):
+        record.request_id = self.request_id
+        return True
+
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(request_id)s %(message)s",
+    handlers=[
+        logging.FileHandler("app.log"),
+        logging.StreamHandler()
+    ]
+)
+
+logger = logging.getLogger("fastapi")
+
+
+@app.middleware("http")
+async def request_id_middleware(request: Request, call_next):
+    request_id = str(uuid.uuid4())
+    request.state.request_id = request_id
+
+    for handler in logging.root.handlers:
+        handler.addFilter(RequestIDFilter(request_id))
+
+    response = await call_next(request)
+
+    return response
 
 
 @app.middleware("http")
@@ -42,7 +77,7 @@ async def auth_middleware(request: Request, call_next):
                 return JSONResponse(status_code=401, content="Disabled user")
             request.state.token_payload = user
         except jwt.JWTError:
-            return JSONResponse(status_code=401,content="Invalid token")
+            return JSONResponse(status_code=401, content="Invalid token")
     else:
         return JSONResponse(status_code=401, content="Token missing")
 
@@ -50,13 +85,33 @@ async def auth_middleware(request: Request, call_next):
     return response
 
 
+# Custom middleware to log exceptions
+@app.middleware("http")
+async def exception_middleware(request: Request, call_next):
+    try:
+        return await call_next(request)
+    except HTTPException as http_exception:
+        logger.error(f"HTTPException: {http_exception.detail}")
+        return JSONResponse(
+            status_code=http_exception.status_code,
+            content={"message": "An error occurred"},
+        )
+    except Exception:
+        logger.exception("Unhandled exception occurred")
+        return JSONResponse(
+            status_code=500,
+            content={"message": "Internal server error"},
+        )
+
+
 @app.get("/users/me")
 async def user_info(request: Request):
     return {"user": request.state.token_payload}
 
+
 @app.post("/token", response_model=Token)
 async def login_for_access_token(
-    form_data: Annotated[OAuth2PasswordRequestForm, Depends()]
+        form_data: Annotated[OAuth2PasswordRequestForm, Depends()]
 ):
     user = authenticate_user(fake_users_db, form_data.username, form_data.password)
     if not user:
@@ -72,10 +127,12 @@ async def login_for_access_token(
 
     return {"access_token": tokens['access_token'], "refresh_token": tokens['refresh_token'], "token_type": "bearer"}
 
+
 @app.post("/refresh-token")
 def refresh_token(input_refresh_token: RefreshToken) -> RefreshTokenOutput:
     try:
-        refresh_token_payload = jwt.decode(input_refresh_token.refresh_token, REFRESH_TOKEN_SECRET_KEY, algorithms=[ALGORITHM])
+        refresh_token_payload = jwt.decode(input_refresh_token.refresh_token, REFRESH_TOKEN_SECRET_KEY,
+                                           algorithms=[ALGORITHM])
         new_access_token = create_access_token(refresh_token_payload)
         return new_access_token
     except JWTError:
@@ -86,12 +143,15 @@ def refresh_token(input_refresh_token: RefreshToken) -> RefreshTokenOutput:
 async def home():
     return {"message": "Welcome to ApnaLawyer!"}
 
+
 @app.post("/query")
-async def query(input_query: QueryInput, request: Request) ->  Union[QueryOutput, list]:
+async def query(input_query: QueryInput, request: Request) -> Union[QueryOutput, list]:
+    logger.info(input_query)
     processor_result = await langchain_query_processor(input_query, request.state.token_payload)
     if isinstance(processor_result, list):
         return processor_result
     return QueryOutput(answer=processor_result[0], negation=processor_result[1])
+
 
 @app.post("/upload-files")
 async def create_upload_file(request: Request, files: list[UploadFile]):
@@ -99,23 +159,24 @@ async def create_upload_file(request: Request, files: list[UploadFile]):
     if user.tier == 0:
         return constants.BAD_REQUEST_PERMISSION_DENIED
 
-    os.makedirs("./storage/files/"+user.username, exist_ok=True)
+    os.makedirs("./storage/files/" + user.username, exist_ok=True)
 
     for file in files:
-            file_path = os.path.join("./storage/files/"+user.username, file.filename)
-            with open(file_path, "wb") as f:
-                contents = await file.read()
-                f.write(contents)
+        file_path = os.path.join("./storage/files/" + user.username, file.filename)
+        with open(file_path, "wb") as f:
+            contents = await file.read()
+            f.write(contents)
 
     await document_input_feeder(user.username)
 
     return {"Uploaded filenames": [file.filename for file in files]}
 
+
 @app.get("/list-files")
 async def list_user_files(request: Request):
     user = request.state.token_payload
-    os.makedirs("./storage/files/"+user.username, exist_ok=True)
+    os.makedirs("./storage/files/" + user.username, exist_ok=True)
 
-    files = os.listdir("./storage/files/"+user.username)
+    files = os.listdir("./storage/files/" + user.username)
 
     return {"Your uploaded files": [file for file in files]}
