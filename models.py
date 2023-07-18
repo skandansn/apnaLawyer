@@ -5,6 +5,7 @@ class QueryInput(BaseModel):
     query: str
     negation: bool | None = False
     query_docs: bool | None = False
+    kanoon: bool | None = False
     model: str | None = "gpt-3.5-turbo"
 
 

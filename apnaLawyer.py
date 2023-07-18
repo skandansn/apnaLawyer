@@ -19,9 +19,9 @@
 #####################################################################
 # using prompt
 import os
-from dotenv import load_dotenv, find_dotenv
 
-load_dotenv(find_dotenv("local.env"))
+import requests
+from dotenv import load_dotenv, find_dotenv
 from langchain.llms import OpenAI
 from langchain import PromptTemplate
 from langchain.chains import LLMChain, SimpleSequentialChain, RetrievalQA
@@ -33,6 +33,7 @@ from langchain.embeddings import OpenAIEmbeddings
 from langchain.vectorstores import Pinecone
 from models import *
 import constants
+load_dotenv(find_dotenv("local.env"))
 
 async def document_input_feeder(username: str):
     loader = DirectoryLoader('./storage/files/'+username)
@@ -76,6 +77,18 @@ async def langchain_query_processor(input_query: QueryInput, user):
 
     llm = OpenAI(model_name=input_query.model)
 
+    if input_query.kanoon:
+        if user.tier != 0:
+            headers = {'Authorization': f'Token '+os.getenv('KANOON_API_TOKEN')}
+            response = requests.post(os.getenv('KANOON_API_URL')+input_query.query, headers=headers, json={})
+            docsResponse = response.json()['docs']
+            docAndUrlList = []
+            for i in docsResponse:
+                docAndUrlList.append([i['title'],i['url']])
+            return docAndUrlList
+        else:
+            return [constants.BAD_REQUEST_PERMISSION_DENIED]
+
     if input_query.query_docs:
         if user.tier != 0:
             docs = await get_relevant_docs(input_query.query, user.username)
@@ -83,7 +96,7 @@ async def langchain_query_processor(input_query: QueryInput, user):
             response = chain.run(input_documents=docs, question=input_query.query)
             return [response, None]
         else:
-            return constants.BAD_REQUEST_PERMISSION_DENIED
+            return [constants.BAD_REQUEST_PERMISSION_DENIED]
 
     query_output=llm(query_prompt.format(query=input_query.query))
     negation_output=None

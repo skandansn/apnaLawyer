@@ -1,16 +1,58 @@
 import random
 
 from authentication import *
+from routes import *
 from apnaLawyer import langchain_query_processor, document_input_feeder
-from fastapi import Depends, FastAPI, HTTPException, status, File, UploadFile
+from fastapi import Request, Depends, FastAPI, HTTPException, status, File, UploadFile
 from typing import Union
+from fastapi.responses import JSONResponse
 import constants
+load_dotenv(find_dotenv("local.env"))
 
 app = FastAPI()
 
+
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    tier = get_route_tier(request.url.path)
+    if tier == "public":
+        response = await call_next(request)
+        return response
+
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    SECRET_KEY = os.getenv('AUTH_SECRET')
+    ALGORITHM = "HS256"
+    authorization = request.headers.get('Authorization')
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split("Bearer ")[1]  # Extract the token value
+        try:
+            payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+            username: str = payload.get("sub")
+            if username is None:
+                raise credentials_exception
+            token_data = TokenData(username=username)
+            user = get_user(fake_users_db, username=token_data.username)
+            if user is None:
+                raise credentials_exception
+            if user.disabled:
+                return JSONResponse(status_code=401, content="Disabled user")
+            request.state.token_payload = user
+        except jwt.JWTError:
+            return JSONResponse(status_code=401,content="Invalid token")
+    else:
+        return JSONResponse(status_code=401, content="Token missing")
+
+    response = await call_next(request)
+    return response
+
+
 @app.get("/users/me")
-async def read_items(current_user: Annotated[str, Depends(get_current_active_user)]):
-    return {"user": current_user}
+async def user_info(request: Request):
+    return {"user": request.state.token_payload}
 
 @app.post("/token", response_model=Token)
 async def login_for_access_token(
@@ -45,14 +87,15 @@ async def home():
     return {"message": "Welcome to ApnaLawyer!"}
 
 @app.post("/query")
-async def query(input_query: QueryInput, user: Annotated[str, Depends(get_current_active_user)]) ->  Union[QueryOutput, str]:
-    processor_result = await langchain_query_processor(input_query, user)
-    if isinstance(processor_result, str):
+async def query(input_query: QueryInput, request: Request) ->  Union[QueryOutput, list]:
+    processor_result = await langchain_query_processor(input_query, request.state.token_payload)
+    if isinstance(processor_result, list):
         return processor_result
     return QueryOutput(answer=processor_result[0], negation=processor_result[1])
 
 @app.post("/upload-files")
-async def create_upload_file(user: Annotated[str, Depends(get_current_active_user)], files: list[UploadFile]):
+async def create_upload_file(request: Request, files: list[UploadFile]):
+    user = request.state.token_payload
     if user.tier == 0:
         return constants.BAD_REQUEST_PERMISSION_DENIED
 
@@ -69,7 +112,8 @@ async def create_upload_file(user: Annotated[str, Depends(get_current_active_use
     return {"Uploaded filenames": [file.filename for file in files]}
 
 @app.get("/list-files")
-async def list_user_files(user: Annotated[str, Depends(get_current_active_user)]):
+async def list_user_files(request: Request):
+    user = request.state.token_payload
     os.makedirs("./storage/files/"+user.username, exist_ok=True)
 
     files = os.listdir("./storage/files/"+user.username)
