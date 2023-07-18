@@ -3,3 +3,9 @@
 
 #ignore secrets
 *.env
+
+#ignore some .idea folder files
+/.idea
+
+#ignore some pycache files
+/__pycache__
