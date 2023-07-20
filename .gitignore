@@ -2,7 +2,7 @@
 /storage
 
 #ignore secrets
-*.env
+local.env
 
 #ignore some .idea folder files
 /.idea
