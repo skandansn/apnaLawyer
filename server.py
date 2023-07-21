@@ -2,7 +2,7 @@ import logging
 import uuid
 from authentication import *
 from routes import *
-from apnaLawyer import langchain_query_processor, document_input_feeder
+from apnaLawyer import langchain_query_processor, document_input_feeder, audio_transcribe
 from fastapi import Request, Depends, FastAPI, HTTPException, status, File, UploadFile
 from typing import Union
 from fastapi.responses import JSONResponse
@@ -180,3 +180,13 @@ async def list_user_files(request: Request):
     files = os.listdir("./storage/files/" + user.username)
 
     return {"Your uploaded files": [file for file in files]}
+
+@app.post("/process-audio")
+async def upload_audio(request: Request):
+    user = request.state.token_payload
+    if user.tier == 0:
+        return constants.BAD_REQUEST_PERMISSION_DENIED
+    processor_result = await audio_transcribe(user)
+
+    return processor_result
+

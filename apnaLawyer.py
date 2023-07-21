@@ -19,7 +19,7 @@
 #####################################################################
 # using prompt
 import os
-
+import whisper
 import requests
 from dotenv import load_dotenv, find_dotenv
 from langchain.llms import OpenAI
@@ -34,6 +34,7 @@ from langchain.vectorstores import Pinecone
 from models import *
 import constants
 load_dotenv(find_dotenv("local.env"))
+
 
 async def document_input_feeder(username: str):
     loader = DirectoryLoader('./storage/files/'+username)
@@ -64,6 +65,13 @@ async def get_relevant_docs(query: str, namespace: str):
     return docs
 
 
+async def audio_transcribe(user):
+    model = whisper.load_model("base")
+    result = model.transcribe("./storage/files/johndoe/tamil.mp3", task="translate")['text']
+    input_query = QueryInput(query=result)
+    return await langchain_query_processor(input_query, user)
+
+
 async def langchain_query_processor(input_query: QueryInput, user):
     query_template = """
     You are an expert lawyer named "Apna Lawyer" well versed in Indian law.
@@ -92,8 +100,20 @@ async def langchain_query_processor(input_query: QueryInput, user):
     if input_query.query_docs:
         if user.tier != 0:
             docs = await get_relevant_docs(input_query.query, user.username)
-            chain = load_qa_chain(llm)
-            response = chain.run(input_documents=docs, question=input_query.query)
+            prompt_template = """If the question is not related to any law or the 
+            constitution, do not answer the question. If it is indeed related to a law or constitution, use the following pieces of context to answer the question at the end. If you don't 
+            know the answer, try using your existing Open AI Chatgpt's general knowledge model apart form this input document to answer the question, but make sure 
+            to notify that this is not in the given input context. 
+
+            {context}
+
+            Question: {question}
+            Answer:"""
+            prompt = PromptTemplate(
+                template=prompt_template, input_variables=["context", "question"]
+            )
+            chain = load_qa_chain(llm, chain_type="stuff", prompt=prompt)
+            response = chain({"input_documents": docs, "question": input_query.query}, return_only_outputs=True)
             return [response, None]
         else:
             return [constants.BAD_REQUEST_PERMISSION_DENIED]
