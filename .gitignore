@@ -2,13 +2,17 @@
 /storage
 
 #ignore secrets
-local.env
+.env
 
 #ignore some .idea folder files
 /.idea
 
 #ignore some pycache files
 /__pycache__
+app/__pycache__
+alembic/__pycache__
+alembic/versions/__pycache__
+app/routers/__pycache__
 
 #ignore logs
 app.log
