@@ -2,9 +2,9 @@
 A lawbot API which uses LLM for reasoning. Has multiple features including answering questions in documents, answering questions using LLMs like gpt3.5/4, using audio as an input for LLM questions instead of text, searching for Law cases/documents using third party APIs.
 
 Tech:
-Python / FastAPI framework
-Langchain + Pinecone
-Kanoon API integrations
+Python / FastAPI framework,
+Langchain + Pinecone,
+Kanoon API integrations,
 Account management using JWT
 
 How to run:
