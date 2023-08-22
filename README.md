@@ -5,6 +5,7 @@ Tech:
 Python / FastAPI framework,
 Langchain + Pinecone,
 Kanoon API integrations,
+Postgres,
 Account management using JWT
 
 How to run:
